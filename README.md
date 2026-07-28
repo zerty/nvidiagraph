@@ -4,6 +4,14 @@
 
 Real-time GPU monitoring dashboard that parses `nvidia-smi` every second and displays interactive graphs via WebSocket. Includes active process monitoring per GPU with the ability to kill processes directly from the dashboard.
 
+## Purpose
+
+A lightweight GPU monitoring tool designed for small-scale servers and workstations that need visibility into GPU utilization, temperatures, power draw, and active processes — **without the overhead of a full Grafana + InfluxDB/Prometheus stack**.
+
+If you have a single server with one or more GPUs and just want a quick dashboard to keep an eye on things (or to let a small team monitor GPU resources), this gives you real-time charts and process management in a single Docker container with zero external dependencies.
+
+For large-scale deployments with retention, alerting, and multi-host aggregation, a proper observability stack like Grafana/Prometheus is still recommended.
+
 ## Features
 
 - **Real-time monitoring**: Parses `nvidia-smi` every second using structured query mode
