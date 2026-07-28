@@ -735,6 +735,14 @@
                 if (charts[`${prefix}-temp`]) {
                     charts[`${prefix}-temp`].data.labels = labels;
                     charts[`${prefix}-temp`].data.datasets[0].data = tempData;
+                    const tempValues = tempData.filter(v => v > 0);
+                    if (tempValues.length > 0) {
+                        const minTemp = Math.min(...tempValues);
+                        const maxTemp = Math.max(...tempValues);
+                        const range = Math.max(maxTemp - minTemp, 5);
+                        charts[`${prefix}-temp`].options.scales.y.min = Math.max(0, Math.floor(minTemp - range * 0.1));
+                        charts[`${prefix}-temp`].options.scales.y.max = Math.ceil(maxTemp + range * 0.1);
+                    }
                     charts[`${prefix}-temp`].update('none');
                 }
 
