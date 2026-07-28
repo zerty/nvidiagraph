@@ -416,6 +416,7 @@
         const charts = {};
         let gpuData = {};
         let gpuHistoryData = {};
+        let gpuNames = {};
 
         // Chart.js defaults
         Chart.defaults.color = '#8b949e';
@@ -455,6 +456,12 @@
 
         // Real-time GPU data
         socket.on('gpu_data', (data) => {
+            // Store GPU names for chart headers
+            if (data.gpus) {
+                data.gpus.forEach(gpu => {
+                    gpuNames[gpu.index] = gpu.name;
+                });
+            }
             updateGpuCards(data.gpus, data.processes);
         });
 
@@ -495,7 +502,10 @@
 
                 card.innerHTML = `
                     <div class="gpu-card-header">
-                        <h3>GPU ${gpu.index}</h3>
+                        <div>
+                            <h3>GPU ${gpu.index}</h3>
+                            <div style="color: #8b949e; font-size: 0.85rem; margin-top: 0.25rem;">${gpu.name}</div>
+                        </div>
                         <span style="color: ${tempColor}; font-weight: 600;">${gpu.temperature.toFixed(1)}°C</span>
                     </div>
                     <div class="gpu-card-stats">
@@ -650,12 +660,13 @@
                 const gpuContainer = document.getElementById(`gpu-charts-${gpuId}`);
                 if (gpuContainer) return; // Already created
 
+                const gpuName = gpuNames[gpuId] || gpuNames[String(gpuId)] || gpuNames[parseInt(gpuId)] || 'GPU ' + gpuId;
                 const div = document.createElement('div');
                 div.id = `gpu-charts-${gpuId}`;
                 div.className = 'gpu-charts-container';
                 div.innerHTML = `
                     <div class="gpu-charts-header">
-                        <h3>GPU ${gpuId} - Detailed Metrics</h3>
+                        <h3>GPU ${gpuId} - ${gpuName} - Detailed Metrics</h3>
                     </div>
                     <div class="charts-grid">
                         <div class="chart-wrapper">
