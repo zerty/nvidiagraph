@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NVIDIA GPU Monitor</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0e17;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #76b900 0%, #5a8f00 100%);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .header h1::before {
+            content: '🟢';
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4444;
+            transition: background 0.3s;
+        }
+
+        .status-dot.connected {
+            background: #76b900;
+            box-shadow: 0 0 8px #76b900;
+        }
+
+        .dashboard {
+            padding: clamp(0.75rem, 2vw, 1.5rem);
+            max-width: 100%;
+            margin: 0 auto;
+        }
+
+        .gpu-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .gpu-card {
+            background: #1a1f2e;
+            border-radius: 12px;
+            padding: 1.25rem;
+            border: 1px solid #2a2f3e;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .gpu-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(118, 185, 0, 0.15);
+        }
+
+        .gpu-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid #2a2f3e;
+        }
+
+        .gpu-card-header h3 {
+            color: #76b900;
+            font-size: 1.1rem;
+        }
+
+        .gpu-card-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+        }
+
+        .stat-item {
+            background: #0d1117;
+            border-radius: 8px;
+            padding: 0.75rem;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #e0e0e0;
+        }
+
+        .stat-value.temp { color: #ff6b6b; }
+        .stat-value.gpu-util { color: #76b900; }
+        .stat-value.mem-util { color: #58a6ff; }
+        .stat-value.power { color: #f0883e; }
+        .stat-value.fan { color: #a371f7; }
+        .stat-value.clock { color: #d2a8ff; }
+
+        .gpu-processes {
+            margin-top: 1rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid #2a2f3e;
+        }
+
+        .gpu-processes h4 {
+            font-size: 0.8rem;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+        }
+
+        .process-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .process-item {
+            background: #0d1117;
+            border-radius: 6px;
+            padding: 0.5rem 0.75rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+        }
+
+        .process-name {
+            color: #e0e0e0;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            margin-right: 0.5rem;
+        }
+
+        .process-pid {
+            color: #8b949e;
+            font-size: 0.75rem;
+            font-family: monospace;
+            margin-right: 0.5rem;
+        }
+
+        .process-mem {
+            color: #58a6ff;
+            font-size: 0.75rem;
+            font-family: monospace;
+        }
+
+        .process-kill {
+            cursor: pointer;
+            color: #ff4444;
+            font-size: 1rem;
+            margin-left: 0.5rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            background: transparent;
+            border: 1px solid #ff444444;
+            transition: background 0.2s;
+            line-height: 1;
+        }
+
+        .process-kill:hover {
+            background: #ff444433;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #2a2f3e;
+            border-radius: 2px;
+            margin-top: 0.5rem;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.5s ease;
+        }
+
+        .progress-fill.gpu-util { background: #76b900; }
+        .progress-fill.mem-util { background: #58a6ff; }
+        .progress-fill.temp { background: linear-gradient(90deg, #76b900, #ff6b6b); }
+
+        .charts-section {
+            margin-top: 1.5rem;
+        }
+
+        .charts-section h2 {
+            color: #76b900;
+            margin-bottom: 1rem;
+            font-size: 1.25rem;
+        }
+
+        .gpu-charts-container {
+            margin-bottom: 2rem;
+            background: #1a1f2e;
+            border-radius: 12px;
+            padding: 1.25rem;
+            border: 1px solid #2a2f3e;
+        }
+
+        .gpu-charts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .gpu-charts-header h3 {
+            color: #76b900;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: clamp(0.5rem, 1vw, 1rem);
+        }
+
+        .chart-wrapper {
+            background: #0d1117;
+            border-radius: 8px;
+            padding: clamp(0.5rem, 1vw, 1rem);
+            min-height: clamp(180px, 25vh, 250px);
+        }
+
+        .chart-wrapper canvas {
+            max-height: clamp(160px, 22vh, 230px);
+        }
+
+        .no-gpus {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: #8b949e;
+        }
+
+        .no-gpus h2 {
+            color: #f0883e;
+            margin-bottom: 1rem;
+        }
+
+        .no-gpus p {
+            margin-bottom: 0.5rem;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 200px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #2a2f3e;
+            border-top-color: #76b900;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 1200px) {
+            .charts-grid {
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            }
+        }
+
+        @media (max-width: 900px) {
+            .gpu-summary {
+                grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            }
+
+            .charts-grid {
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            }
+
+            .header {
+                padding: 0.75rem 1rem;
+            }
+
+            .header h1 {
+                font-size: 1.2rem;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .charts-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .gpu-card-stats {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .header h1 {
+                font-size: 1.1rem;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .gpu-summary {
+                grid-template-columns: 1fr;
+            }
+
+            .gpu-card-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .header {
+                padding: 0.5rem 0.75rem;
+                flex-direction: column;
+                gap: 0.5rem;
+                text-align: center;
+            }
+
+            .header h1 {
+                font-size: 1rem;
+            }
+
+            .chart-wrapper {
+                min-height: 160px;
+            }
+
+            .chart-wrapper canvas {
+                max-height: 140px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NVIDIA GPU Monitor</h1>
+        <div style="display: flex; align-items: center; gap: 1.5rem;">
+            <a href="/logout" style="color: white; text-decoration: none; font-size: 0.9rem; opacity: 0.8; transition: opacity 0.2s;">Logout</a>
+            <div class="connection-status">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Connecting...</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard">
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+        </div>
+
+        <div id="noGpus" class="no-gpus" style="display: none;">
+            <h2>No GPUs Detected</h2>
+            <p>Make sure nvidia-smi is available in the container.</p>
+            <p>Check that NVIDIA Container Toolkit is properly configured.</p>
+        </div>
+
+        <div id="content" style="display: none;">
+            <div class="gpu-summary" id="gpuSummary"></div>
+
+            <div class="charts-section">
+                <h2>📊 Real-time Graphs</h2>
+                <div id="gpuCharts"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Connect to Socket.IO
+        const socket = io();
+        const charts = {};
+        let gpuData = {};
+        let gpuHistoryData = {};
+
+        // Chart.js defaults
+        Chart.defaults.color = '#8b949e';
+        Chart.defaults.borderColor = '#2a2f3e';
+        Chart.defaults.font.family = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+
+        // Connection handling
+        socket.on('connect', () => {
+            document.getElementById('statusDot').classList.add('connected');
+            document.getElementById('statusText').textContent = 'Connected';
+        });
+
+        socket.on('disconnect', () => {
+            document.getElementById('statusDot').classList.remove('connected');
+            document.getElementById('statusText').textContent = 'Disconnected';
+        });
+
+        socket.on('connected', (data) => {
+            console.log('Connected:', data.message);
+        });
+
+        // Redirect to login if not authenticated
+        socket.on('require_login', () => {
+            window.location.href = '/login?next=' + encodeURIComponent(window.location.href);
+        });
+
+        // GPU info
+        socket.on('gpu_info', (data) => {
+            if (data.gpu_count === 0) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('noGpus').style.display = 'block';
+            } else {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            }
+        });
+
+        // Real-time GPU data
+        socket.on('gpu_data', (data) => {
+            updateGpuCards(data.gpus, data.processes);
+        });
+
+        // History data for charts
+        socket.on('gpu_history', (data) => {
+            gpuHistoryData = data;
+            updateCharts();
+        });
+
+        // Kill process result
+        socket.on('kill_result', (data) => {
+            if (data.success) {
+                console.log(`Killed process ${data.pid}`);
+            } else {
+                console.error(`Failed to kill process: ${data.message}`);
+                alert(`Failed to kill process: ${data.message}`);
+            }
+        });
+
+        function updateGpuCards(gpus, processes) {
+            const summary = document.getElementById('gpuSummary');
+
+            if (gpus.length === 0) return;
+
+            // Build or update GPU cards
+            gpus.forEach(gpu => {
+                let card = document.getElementById(`gpu-card-${gpu.index}`);
+
+                if (!card) {
+                    card = document.createElement('div');
+                    card.id = `gpu-card-${gpu.index}`;
+                    card.className = 'gpu-card';
+                    summary.appendChild(card);
+                }
+
+                const memPercent = gpu.mem_total > 0 ? ((gpu.mem_used / gpu.mem_total) * 100).toFixed(1) : 0;
+                const tempColor = gpu.temperature > 85 ? '#ff4444' : gpu.temperature > 75 ? '#f0883e' : '#76b900';
+
+                card.innerHTML = `
+                    <div class="gpu-card-header">
+                        <h3>GPU ${gpu.index}</h3>
+                        <span style="color: ${tempColor}; font-weight: 600;">${gpu.temperature.toFixed(1)}°C</span>
+                    </div>
+                    <div class="gpu-card-stats">
+                        <div class="stat-item">
+                            <div class="stat-label">GPU Utilization</div>
+                            <div class="stat-value gpu-util">${gpu.gpu_util.toFixed(0)}%</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill gpu-util" style="width: ${gpu.gpu_util}%"></div>
+                            </div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Memory Usage</div>
+                            <div class="stat-value mem-util">${gpu.mem_used.toFixed(0)} / ${gpu.mem_total.toFixed(0)} MB</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill mem-util" style="width: ${memPercent}%"></div>
+                            </div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Power Draw</div>
+                            <div class="stat-value power">${gpu.power_draw.toFixed(1)} / ${gpu.power_limit.toFixed(0)} W</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Fan Speed</div>
+                            <div class="stat-value fan">${gpu.fan_speed.toFixed(0)}%</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">GPU Clock</div>
+                            <div class="stat-value clock">${gpu.gpu_clock.toFixed(0)} MHz</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Memory Clock</div>
+                            <div class="stat-value clock">${gpu.mem_clock.toFixed(0)} MHz</div>
+                        </div>
+                    </div>
+                    ${renderProcesses(gpu.index, processes)}
+                `;
+            });
+        }
+
+        function renderProcesses(gpuIndex, processes) {
+            const gpuProcesses = processes ? (processes[gpuIndex] || processes[String(gpuIndex)] || []) : [];
+
+            if (gpuProcesses.length === 0) {
+                return `
+                    <div class="gpu-processes">
+                        <h4>Processes</h4>
+                        <div class="process-list">
+                            <div class="process-item" style="color: #8b949e; font-style: italic;">
+                                No active processes
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const processItems = gpuProcesses.map(p => `
+                <div class="process-item" title="${p.name}">
+                    <span class="process-name">${p.name}</span>
+                    <span class="process-pid">PID ${p.pid}</span>
+                    <span class="process-mem">${p.mem_used} MiB</span>
+                    <button class="process-kill" onclick="killProcess(${p.pid})" title="Kill process">✕</button>
+                </div>
+            `).join('');
+
+            return `
+                <div class="gpu-processes">
+                    <h4>Processes (${gpuProcesses.length})</h4>
+                    <div class="process-list">
+                        ${processItems}
+                    </div>
+                </div>
+            `;
+        }
+
+        function killProcess(pid) {
+            if (confirm(`Kill process ${pid} with kill -9?`)) {
+                socket.emit('kill_process', { pid });
+            }
+        }
+
+        function createChart(canvasId, label, color, unit, dataKey) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: label,
+                        data: [],
+                        borderColor: color,
+                        backgroundColor: color + '20',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 300 },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: (ctx) => `${label}: ${ctx.parsed.y.toFixed(1)}${unit}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'category',
+                            ticks: {
+                                maxTicksLimit: 6,
+                                maxRotation: 0,
+                                callback: function(value, index) {
+                                    const labels = this.getLabelForValue(value);
+                                    return labels;
+                                }
+                            },
+                            grid: { display: false }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => value + unit
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function initCharts() {
+            // Wait for first data
+            const checkInterval = setInterval(() => {
+                if (Object.keys(gpuHistoryData).length > 0) {
+                    clearInterval(checkInterval);
+                    setupGpuCharts();
+                }
+            }, 500);
+        }
+
+        function setupGpuCharts() {
+            const container = document.getElementById('gpuCharts');
+
+            Object.keys(gpuHistoryData).forEach(gpuId => {
+                const gpuContainer = document.getElementById(`gpu-charts-${gpuId}`);
+                if (gpuContainer) return; // Already created
+
+                const div = document.createElement('div');
+                div.id = `gpu-charts-${gpuId}`;
+                div.className = 'gpu-charts-container';
+                div.innerHTML = `
+                    <div class="gpu-charts-header">
+                        <h3>GPU ${gpuId} - Detailed Metrics</h3>
+                    </div>
+                    <div class="charts-grid">
+                        <div class="chart-wrapper">
+                            <canvas id="chart-gpu-${gpuId}-util"></canvas>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="chart-gpu-${gpuId}-mem"></canvas>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="chart-gpu-${gpuId}-temp"></canvas>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="chart-gpu-${gpuId}-power"></canvas>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="chart-gpu-${gpuId}-fan"></canvas>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+
+                // Create charts
+                charts[`gpu-${gpuId}-util`] = createChart(
+                    `chart-gpu-${gpuId}-util`, 'GPU Utilization', '#76b900', '%', 'gpu_util'
+                );
+                charts[`gpu-${gpuId}-mem`] = createChart(
+                    `chart-gpu-${gpuId}-mem`, 'Memory Used', '#58a6ff', ' MB', 'mem_used'
+                );
+                charts[`gpu-${gpuId}-temp`] = createChart(
+                    `chart-gpu-${gpuId}-temp`, 'Temperature', '#ff6b6b', '°C', 'temperature'
+                );
+                charts[`gpu-${gpuId}-power`] = createChart(
+                    `chart-gpu-${gpuId}-power`, 'Power Draw', '#f0883e', ' W', 'power_draw'
+                );
+                charts[`gpu-${gpuId}-fan`] = createChart(
+                    `chart-gpu-${gpuId}-fan`, 'Fan Speed', '#a371f7', '%', 'fan_speed'
+                );
+            });
+        }
+
+        function updateCharts() {
+            const now = Date.now();
+            Object.keys(gpuHistoryData).forEach(gpuId => {
+                const history = gpuHistoryData[gpuId];
+                if (!history || history.length === 0) return;
+
+                const labels = history.map(d => {
+                    const age = (now - (d.epoch * 1000)) / 1000;
+                    return `${age.toFixed(0)}s ago`;
+                });
+                const gpuUtilData = history.map(d => d.gpu_util);
+                const memData = history.map(d => d.mem_used);
+                const tempData = history.map(d => d.temperature);
+                const powerData = history.map(d => d.power_draw);
+                const fanData = history.map(d => d.fan_speed);
+
+                // Get max values from the latest data point for each GPU
+                const latestGpu = history[history.length - 1];
+                const memTotal = latestGpu ? latestGpu.mem_total : 0;
+                const powerLimit = latestGpu ? latestGpu.power_limit : 0;
+
+                const prefix = `gpu-${gpuId}`;
+
+                if (charts[`${prefix}-util`]) {
+                    charts[`${prefix}-util`].data.labels = labels;
+                    charts[`${prefix}-util`].data.datasets[0].data = gpuUtilData;
+                    charts[`${prefix}-util`].update('none');
+                }
+
+                if (charts[`${prefix}-mem`]) {
+                    charts[`${prefix}-mem`].data.labels = labels;
+                    charts[`${prefix}-mem`].data.datasets[0].data = memData;
+                    charts[`${prefix}-mem`].options.scales.y.max = memTotal;
+                    charts[`${prefix}-mem`].update('none');
+                }
+
+                if (charts[`${prefix}-temp`]) {
+                    charts[`${prefix}-temp`].data.labels = labels;
+                    charts[`${prefix}-temp`].data.datasets[0].data = tempData;
+                    charts[`${prefix}-temp`].update('none');
+                }
+
+                if (charts[`${prefix}-power`]) {
+                    charts[`${prefix}-power`].data.labels = labels;
+                    charts[`${prefix}-power`].data.datasets[0].data = powerData;
+                    charts[`${prefix}-power`].options.scales.y.max = powerLimit;
+                    charts[`${prefix}-power`].update('none');
+                }
+
+                if (charts[`${prefix}-fan`]) {
+                    charts[`${prefix}-fan`].data.labels = labels;
+                    charts[`${prefix}-fan`].data.datasets[0].data = fanData;
+                    charts[`${prefix}-fan`].options.scales.y.max = 100;
+                    charts[`${prefix}-fan`].update('none');
+                }
+            });
+        }
+
+        // Initialize
+        initCharts();
+
+        // Handle window resize - update chart layout
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                Object.values(charts).forEach(chart => {
+                    if (chart && chart.resize) {
+                        chart.resize();
+                    }
+                });
+            }, 150);
+        });
+    </script>
+</body>
+</html>
