@@ -286,7 +286,7 @@ def login_page():
         else:
             return render_template('login.html', error='Incorrect password', next=next_url), 401
 
-    return render_template('login.html', error=None)
+    return render_template('login.html', error=None, next=next_url)
 
 
 @app.route('/logout')
