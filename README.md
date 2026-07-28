@@ -25,6 +25,13 @@ For large-scale deployments with retention, alerting, and multi-host aggregation
 - **Responsive UI**: Dark-themed dashboard optimized for desktop and mobile
 - **Dockerized**: Production-ready with Gunicorn + Eventlet
 
+## Screenshots
+
+<img width="928" height="320" alt="image" src="https://github.com/user-attachments/assets/5d8580b4-7a3f-48a4-b6cd-8fb295e5da52" />
+
+<img width="928" height="362" alt="image" src="https://github.com/user-attachments/assets/c2e62ddb-ecf4-4dec-b6c8-9e750c7d59dc" />
+
+
 ## Quick Start
 
 ### Prerequisites
