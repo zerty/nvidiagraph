@@ -46,7 +46,7 @@ def parse_nvidia_smi():
         result = subprocess.run(
             [
                 'nvidia-smi',
-                '--query-gpu=index,name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit,fan.speed,clocks.current.graphics,clocks.current.memory,clocks.current.video',
+                '--query-gpu=index,name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit,power.max_limit,fan.speed,clocks.current.graphics,clocks.current.memory,clocks.current.video',
                 '--format=csv,noheader,nounits'
             ],
             capture_output=True,
@@ -66,7 +66,7 @@ def parse_nvidia_smi():
             # Parse CSV line - handle quoted fields (GPU name can contain commas)
             values = parse_csv_line(line)
 
-            if len(values) >= 13:
+            if len(values) >= 14:
                 gpu = {
                     'index': int(values[0]),
                     'name': values[1],
@@ -77,10 +77,11 @@ def parse_nvidia_smi():
                     'temperature': float(values[6]),
                     'power_draw': float(values[7]),
                     'power_limit': float(values[8]),
-                    'fan_speed': float(values[9]) if values[9] != 'N/A' else 0,
-                    'gpu_clock': float(values[10]),
-                    'mem_clock': float(values[11]),
-                    'video_clock': float(values[12]),
+                    'power_max_limit': float(values[9]),
+                    'fan_speed': float(values[10]) if values[10] != 'N/A' else 0,
+                    'gpu_clock': float(values[11]),
+                    'mem_clock': float(values[12]),
+                    'video_clock': float(values[13]),
                     'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'epoch': time.time()
                 }
@@ -379,6 +380,61 @@ def handle_kill_process(data):
             emit('kill_result', {'success': False, 'pid': pid, 'message': msg})
     except Exception as e:
         emit('kill_result', {'success': False, 'pid': pid, 'message': str(e)})
+
+
+@socketio.on('set_power_limit')
+def handle_set_power_limit(data):
+    """Set power limit for a GPU using nvidia-smi."""
+    gpu_index = data.get('gpu_index')
+    power_limit = data.get('power_limit')
+
+    if gpu_index is None or power_limit is None:
+        emit('power_limit_result', {'success': False, 'message': 'Missing GPU index or power limit'})
+        return
+
+    # Sanitize inputs
+    try:
+        gpu_index = int(gpu_index)
+        power_limit = int(power_limit)
+    except (ValueError, TypeError):
+        emit('power_limit_result', {'success': False, 'message': 'Invalid values'})
+        return
+
+    if power_limit < 0:
+        emit('power_limit_result', {'success': False, 'message': 'Power limit must be positive'})
+        return
+
+    try:
+        result = subprocess.run(
+            ['nvidia-smi', '--id', str(gpu_index), '-pm', '1'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode != 0:
+            msg = result.stderr.strip() or 'Failed to enable persistence mode'
+            emit('power_limit_result', {'success': False, 'gpu_index': gpu_index, 'message': msg})
+            return
+
+        result = subprocess.run(
+            ['nvidia-smi', '--id', str(gpu_index), '-pl', str(power_limit)],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            print(f"GPU {gpu_index} power limit set to {power_limit}W")
+            emit('power_limit_result', {
+                'success': True,
+                'gpu_index': gpu_index,
+                'power_limit': power_limit,
+                'message': f'GPU {gpu_index} power limit set to {power_limit}W'
+            })
+        else:
+            msg = result.stderr.strip() or 'Unknown error'
+            emit('power_limit_result', {'success': False, 'gpu_index': gpu_index, 'message': msg})
+    except Exception as e:
+        emit('power_limit_result', {'success': False, 'gpu_index': gpu_index, 'message': str(e)})
 
 
 def start_monitoring():

@@ -7,6 +7,8 @@ services:
     ports:
       - "5000:5000"
     pid: host
+    cap_add:
+      - SYS_ADMIN
     deploy:
       resources:
         reservations:

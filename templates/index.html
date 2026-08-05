@@ -205,6 +205,77 @@
             background: #ff444433;
         }
 
+        .power-limit-control {
+            margin-top: 1rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid #2a2f3e;
+        }
+
+        .power-limit-control h4 {
+            font-size: 0.8rem;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .power-limit-value {
+            color: #f0883e;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .power-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #2a2f3e;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .power-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #f0883e;
+            cursor: pointer;
+            transition: transform 0.15s;
+        }
+
+        .power-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .power-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #f0883e;
+            cursor: pointer;
+            border: none;
+            transition: transform 0.15s;
+        }
+
+        .power-slider::-moz-range-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .power-slider-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.7rem;
+            color: #8b949e;
+            margin-top: 0.25rem;
+        }
+
         .progress-bar {
             width: 100%;
             height: 4px;
@@ -481,6 +552,16 @@
             }
         });
 
+        // Power limit result
+        socket.on('power_limit_result', (data) => {
+            if (data.success) {
+                console.log(`GPU ${data.gpu_index} power limit set to ${data.power_limit}W`);
+            } else {
+                console.error(`Failed to set power limit: ${data.message}`);
+                alert(`Failed to set power limit: ${data.message}`);
+            }
+        });
+
         function updateGpuCards(gpus, processes) {
             const summary = document.getElementById('gpuSummary');
 
@@ -540,9 +621,54 @@
                             <div class="stat-value clock">${gpu.mem_clock.toFixed(0)} MHz</div>
                         </div>
                     </div>
+                    ${renderPowerSlider(gpu.index, gpu.power_limit, gpu.power_max_limit)}
                     ${renderProcesses(gpu.index, processes)}
                 `;
             });
+        }
+
+        function renderPowerSlider(gpuIndex, powerLimit, powerMaxLimit) {
+            const minLimit = Math.max(0, Math.floor(powerLimit * 0.25));
+            const maxLimit = Math.round(powerMaxLimit);
+
+            return `
+                <div class="power-limit-control">
+                    <h4>
+                        <span>Power Limit</span>
+                        <span class="power-limit-value" id="power-val-${gpuIndex}">${powerLimit}W</span>
+                    </h4>
+                    <input type="range"
+                           class="power-slider"
+                           id="power-slider-${gpuIndex}"
+                           min="${minLimit}"
+                           max="${maxLimit}"
+                           step="5"
+                           value="${powerLimit}"
+                           oninput="updatePowerLimit(${gpuIndex}, this.value, ${maxLimit})"
+                           onmouseup="applyPowerLimit(${gpuIndex}, this.value)"
+                           onmouseleave="applyPowerLimit(${gpuIndex}, this.value)"
+                    />
+                    <div class="power-slider-labels">
+                        <span>${minLimit}W</span>
+                        <span>${maxLimit}W</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function updatePowerLimit(gpuIndex, value, maxLimit) {
+            const valEl = document.getElementById(`power-val-${gpuIndex}`);
+            if (valEl) {
+                valEl.textContent = `${value}W`;
+            }
+        }
+
+        let powerLimitDebounceTimers = {};
+        function applyPowerLimit(gpuIndex, value) {
+            clearTimeout(powerLimitDebounceTimers[gpuIndex]);
+            powerLimitDebounceTimers[gpuIndex] = setTimeout(() => {
+                socket.emit('set_power_limit', { gpu_index: gpuIndex, power_limit: parseInt(value) });
+            }, 300);
         }
 
         function renderProcesses(gpuIndex, processes) {
